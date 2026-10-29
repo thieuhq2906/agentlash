@@ -7,6 +7,7 @@ user32 = ctypes.windll.user32
 VK_LBUTTON = 0x01
 VK_RBUTTON = 0x02
 VK_F8 = 0x77
+VK_F9 = 0x78
 SM_SWAPBUTTON = 23
 
 class GlobalMouseHook(QThread):
@@ -17,12 +18,14 @@ class GlobalMouseHook(QThread):
     """
     click_event = pyqtSignal()
     hotkey_event = pyqtSignal()
+    twist_hotkey_event = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.running = True
         self.was_click_down = False
         self.was_f8_down = False
+        self.was_f9_down = False
 
     def primary_button_vk(self):
         # GetAsyncKeyState reports physical buttons; left-handed users have the primary button on the right
@@ -48,6 +51,12 @@ class GlobalMouseHook(QThread):
             if is_f8_down and not self.was_f8_down:
                 self.hotkey_event.emit()
             self.was_f8_down = is_f8_down
+
+            # 3. Security Twist Hotkey (F9) - for instant demo during presentations
+            is_f9_down = bool(user32.GetAsyncKeyState(VK_F9) & 0x8000)
+            if is_f9_down and not self.was_f9_down:
+                self.twist_hotkey_event.emit()
+            self.was_f9_down = is_f9_down
 
             # Sleep 5ms for ~200Hz polling rate (undetectable latency, <0.1% CPU)
             time.sleep(0.005)

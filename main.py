@@ -5,6 +5,7 @@ import shutil
 import logging
 import traceback
 from logging.handlers import RotatingFileHandler
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QAction, QActionGroup
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox
@@ -14,8 +15,12 @@ from config import config, get_asset_path, get_base_dir, get_bundle_dir, get_dat
 from overlay import WhipScene
 from global_hook import GlobalMouseHook
 from sound_player import sound_player
+from edition import SECURITY_EDITION
+if SECURITY_EDITION:
+    from security_awareness import security_sim, SecurityRevealDialog
 
 APP_TITLE = "AgentLash"
+USAGE_TICK_MS = 1000
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 ERROR_ALREADY_EXISTS = 183
 
@@ -63,19 +68,30 @@ class AgentLashApp:
         self.create_tray_icon()
 
         # Start Global Input Hook
+        self.dialog_open = False
         self.hook = GlobalMouseHook()
         self.hook.click_event.connect(self.scene.on_mouse_click)
         self.hook.hotkey_event.connect(self.toggle_active)
+        if SECURITY_EDITION:
+            self.hook.twist_hotkey_event.connect(self.on_security_twist)
+            self.hook.click_event.connect(security_sim.record_click)
+            # The awareness screen appears after N minutes of *active* use (paused while toggled off with F8)
+            self.usage_seconds = 0
+            self.twist_shown = False
+            self.usage_timer = QTimer()
+            self.usage_timer.timeout.connect(self.on_usage_tick)
+            self.usage_timer.start(USAGE_TICK_MS)
         self.hook.start()
 
         self.app.aboutToQuit.connect(self.cleanup)
 
         # Notify user
         if QSystemTrayIcon.isSystemTrayAvailable():
+            hint = "Phím F8: Bật/Tắt • Phím F9: Nhận thức bảo mật." if SECURITY_EDITION else "Phím F8: Bật/Tắt nhanh."
             if config.get("active", True):
-                msg = "Đã kích hoạt! Click chuột bất cứ đâu trên màn hình để quất roi.\nPhím F8: Bật/Tắt nhanh."
+                msg = f"Đã kích hoạt! Click chuột bất cứ đâu trên màn hình để quất roi.\n{hint}"
             else:
-                msg = "Đang TẠM DỪNG. Bấm F8 (hoặc menu ở khay hệ thống) để bật lại."
+                msg = f"Đang TẠM DỪNG. Bấm F8 (hoặc menu ở khay hệ thống) để bật lại.\n{hint}"
             self.tray.showMessage(f"{APP_TITLE} 💥", msg, QSystemTrayIcon.MessageIcon.Information, 3000)
 
     def add_choice_menu(self, parent, title, key, options, on_select=None, checked_if=None):
@@ -103,7 +119,7 @@ class AgentLashApp:
 
     def create_tray_icon(self):
         self.tray = QSystemTrayIcon(self.icon, self.app)
-        self.tray.setToolTip(f"{APP_TITLE}\nPhím F8: Bật/Tắt")
+        self.tray.setToolTip(f"{APP_TITLE}\nPhím F8: Bật/Tắt" + (" • Phím F9: Nhận thức bảo mật" if SECURITY_EDITION else ""))
         self.tray.activated.connect(self.on_tray_activated)
 
         # Keep a reference: QSystemTrayIcon does not own its context menu
@@ -118,18 +134,28 @@ class AgentLashApp:
         self.toggle_action.triggered.connect(self.toggle_active)
         self.refresh_toggle_text()
 
+        # Office Mode Toggle
+        self.office_action = QAction("🤫 Chế Độ Văn Phòng Yên Tĩnh (Office Mode)", menu, checkable=True)
+        self.office_action.setChecked(config.get("office_mode", False))
+        self.office_action.toggled.connect(self.toggle_office_mode)
+        menu.addAction(self.office_action)
+
         menu.addSeparator()
 
         # --- STYLE SELECTION ---
-        self.add_choice_menu(menu, "🎨 Chọn Kiểu Roi", "whip_style", [
-            ("comic", "💥 Comic Pop-Art (Nổ POW!)"),
-            ("cyber", "⚡ Cyberpunk Neon (Tia điện ZAP!)"),
-            ("classic", "🤠 Classic Western (Da bện CRACK!)"),
+        self.add_choice_menu(menu, "🎨 Chọn Kiểu Vũ Khí & Roi", "whip_style", [
+            ("comic", "💥 Comic Pop-Art (Vòng sao + Boinggg/BONK!)"),
+            ("cyber", "⚡ Cyberpunk Neon (Glitch 0101 + USB/ZAP!)"),
+            ("classic", "🤠 Classic Western (Bụi cát sa mạc + YEE-HAW!)"),
+            ("taser", "⚡ Kìm Điện Cam-pu-chia (Alo tỉnh ngủ + BZZZT!)"),
+            ("sword", "🗡️ Thanh Kiếm Trung Cổ (TRẢM + Vỡ rạn SMASH!)"),
         ], on_select=self.set_style)
 
         # --- SOUND SELECTION ---
         sound_menu, _ = self.add_choice_menu(menu, "🔊 Âm Thanh", "sound_mode", [
-            ("themed", "💥 Quất roi theo kiểu (Comic/Cyber/Classic)"),
+            ("themed", "💥 Theo kiểu vũ khí"),
+            ("tom_combo", "🐱 Mèo Tom la thất thanh (Tom & Jerry Combo)"),
+            ("tom_only", "😱 Chỉ tiếng mèo Tom hét"),
             ("random", "🎲 Ngẫu nhiên các âm thanh"),
             ("mute", "🔇 Tắt âm thanh"),
         ], on_select=self.set_sound_mode,
@@ -148,12 +174,35 @@ class AgentLashApp:
         self.add_toggle(fx_menu, "Hoạt ảnh nổ khi trúng đòn (POW/ZAP/CRACK)", "pow_animation")
         self.add_toggle(fx_menu, "Dùng hoạt ảnh tùy chỉnh (nếu có)", "custom_animation_enabled")
         fx_menu.addSeparator()
-        speed = config.get("strike_speed_ms", 180)
+        speed = config.get("strike_speed_ms", 90)
+        speeds = (60, 90, 140, 220)
         self.add_choice_menu(fx_menu, "⏱️ Tốc độ quất", "strike_speed_ms", [
-            (120, "Rất nhanh"), (180, "Nhanh (mặc định)"), (260, "Vừa"), (380, "Chậm"),
-        ], checked_if=lambda v: v == speed or (v == 180 and speed not in (120, 180, 260, 380)))
+            (60, "Tức thì"), (90, "Nhanh (mặc định)"), (140, "Vừa"), (220, "Chậm (xem rõ đường roi)"),
+        ], checked_if=lambda v: v == speed or (v == 90 and speed not in speeds))
 
         menu.addSeparator()
+
+        # --- SECURITY AWARENESS SHOWCASE (security edition only) ---
+        if SECURITY_EDITION:
+            sec_menu = menu.addMenu("🛡️ Sáng Kiến Nhận Thức Bảo Mật")
+            trigger_twist_act = sec_menu.addAction("⚠️ Kích Hoạt Cú Twist Bảo Mật (F9)")
+            trigger_twist_act.triggered.connect(self.on_security_twist)
+
+            show_dashboard_act = sec_menu.addAction("📋 Xem Trung Tâm Cảnh Báo & Đối Chiếu")
+            show_dashboard_act.triggered.connect(self.open_security_dialog)
+
+            sec_menu.addSeparator()
+            self.add_toggle(sec_menu, "Tự động hiện cảnh báo sau thời gian sử dụng", "security_twist_enabled")
+
+            cur_minutes = config.get("twist_minutes", 10)
+            self.add_choice_menu(sec_menu, "⏱️ Hiện cảnh báo sau", "twist_minutes", [
+                (5, "5 phút sử dụng"),
+                (10, "10 phút sử dụng (Mặc định)"),
+                (20, "20 phút sử dụng"),
+                (30, "30 phút sử dụng"),
+            ], checked_if=lambda v: v == cur_minutes)
+
+            menu.addSeparator()
 
         # Folders
         open_anim_act = menu.addAction("📂 Mở thư mục hoạt ảnh tùy chỉnh (GIF/PNG)")
@@ -255,20 +304,72 @@ class AgentLashApp:
             log.error("Cannot change autostart: %s", e)
             QMessageBox.warning(None, APP_TITLE, f"Không thay đổi được cài đặt khởi động:\n{e}")
 
+    def toggle_office_mode(self, enabled):
+        config.set("office_mode", enabled)
+        self.scene.wake()
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            status = "Đã bật Chế Độ Văn Phòng: Thu nhỏ bằng chuột & Tắt tiếng 🤫" if enabled else "Đã tắt Chế Độ Văn Phòng."
+            self.tray.showMessage("AgentLash", status, QSystemTrayIcon.MessageIcon.Information, 1500)
+
     def show_about(self):
         QMessageBox.information(
             None,
             "AgentLash",
-            "💥 ỨNG DỤNG ROI DA GIẢI TRÍ KHI ĐỢI AGENT 💥\n\n"
-            "• Click chuột trái bất cứ đâu trên màn hình để quất roi!\n"
-            "• Phím F8 (hoặc nhấp đúp icon ở khay hệ thống): Bật/Tắt nhanh.\n"
-            "• 3 Kiểu roi độc đáo: Comic Pop-Art (POW!), Cyberpunk Neon (ZAP!), Classic Western (CRACK!).\n"
-            "• Tiếng quất roi đanh gọn theo từng kiểu roi (thêm tiếng của bạn vào thư mục 'custom_sounds').\n"
-            "• Hoạt ảnh riêng: thả file .gif / .png (hoặc chuỗi frame_01.png, frame_02.png...) vào thư mục 'custom_animation'.\n"
-            "• Âm thanh riêng: thả file .wav / .mp3 vào thư mục 'custom_sounds'.\n"
-            "  (Không cần khởi động lại, ứng dụng tự nhận file mới.)\n\n"
-            "Chúc bạn quất agent thật vui vẻ trong lúc đợi hoàn thành task! 😄"
+            "💥 ỨNG DỤNG VŨ KHÍ GIẢI TRÍ KHI ĐỢI AGENT 💥\n\n"
+            "• Click chuột trái bất cứ đâu trên màn hình để vung đòn!\n"
+            "• Phím F8 (hoặc nhấp đúp icon ở khay): Bật/Tắt quất roi.\n"
+            + ("• Phím F9: Kích hoạt trung tâm Nhận thức An ninh Thông tin.\n" if SECURITY_EDITION else "") +
+            "• 🤫 Chế độ Văn phòng Yên Tĩnh: Thu nhỏ bằng chuột & tự động tắt tiếng.\n"
+            "• 5 Bộ Vũ Khí Độc Lạ:\n"
+            "  1. 💥 Comic Pop-Art: Vòng sao choáng đầu + Boinggg lò xo / BONK!\n"
+            "  2. ⚡ Cyberpunk Neon: Màn hình glitch 0101 + USB cắm rút / ZAP!\n"
+            "  3. 🤠 Classic Western: Vệt lửa cát sa mạc + Huýt sáo / YEE-HAW!\n"
+            "  4. ⚡ Kìm Điện Cam-pu-chia: Tia sét nổ tung + Alo tỉnh ngủ + Tom hét!\n"
+            "  5. 🗡️ Thanh Kiếm Trung Cổ: Vết chém rạn vỡ + Tiếng TRẢM uy lực!\n\n"
+            "Chúc bạn kỷ luật agent thật vui vẻ trong lúc chờ đợi hoàn thành task! 😄"
         )
+
+    def on_usage_tick(self):
+        """Counts active-use time; shows the awareness screen once per session after the configured minutes"""
+        if self.twist_shown or self.dialog_open or not config.get("active", True):
+            return
+        self.usage_seconds += USAGE_TICK_MS // 1000
+        if config.get("security_twist_enabled", True) and self.usage_seconds >= config.get("twist_minutes", 10) * 60:
+            self.on_security_twist()
+
+    def on_security_twist(self):
+        if getattr(self, "dialog_open", False):
+            return
+        self.dialog_open = True
+        self.twist_shown = True
+        security_sim.trigger_twist()
+
+        was_active = config.get("active", True)
+        if was_active:
+            self.scene.set_active(False)
+            self.refresh_toggle_text()
+
+        # Phát âm thanh đòn quất kịch tính cho cú twist
+        sound_player.play_crack(config.get("whip_style", "comic"))
+
+        try:
+            dialog = SecurityRevealDialog()
+            dialog.exec()
+        finally:
+            self.dialog_open = False
+            if was_active:
+                self.scene.set_active(True)
+                self.refresh_toggle_text()
+
+    def open_security_dialog(self):
+        if getattr(self, "dialog_open", False):
+            return
+        self.dialog_open = True
+        try:
+            dialog = SecurityRevealDialog()
+            dialog.exec()
+        finally:
+            self.dialog_open = False
 
     def cleanup(self):
         self.hook.stop()

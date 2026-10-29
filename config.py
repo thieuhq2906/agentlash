@@ -7,20 +7,25 @@ APP_NAME = "AgentLash"
 
 DEFAULT_CONFIG = {
     "whip_style": "comic",          # "comic", "cyber", "classic"
-    "sound_mode": "themed",         # "themed" (crack matching the whip style), "random"
+    "sound_mode": "themed",         # "themed" (matching the weapon), "tom_combo", "tom_only", "random"
     "show_cursor_whip": True,       # Whip handle and tail following mouse
     "whip_animation": True,         # Whip strike slash wave
     "pow_animation": True,          # Comic POW! explosion popup
     "sound_enabled": True,          # Whip crack sound effect
     "volume": 1.0,                  # Volume factor (0.0 to 1.0)
     "custom_animation_enabled": True,# Check and use assets/custom_animation/
-    "strike_speed_ms": 180,         # Time from click until the whip tip cracks (ms)
-    "active": True                  # Master toggle
+    "strike_speed_ms": 90,          # Time from click until the whip tip cracks (ms)
+    "active": True,                 # Master toggle
+    "office_mode": False,           # Chế độ Văn Phòng Yên Tĩnh: thu nhỏ = chuột, tắt tiếng
+    "security_twist_enabled": True, # Security edition: show the awareness screen after N minutes of use
+    "twist_minutes": 10,            # Minutes of active use before the awareness screen appears
+    "config_version": 2             # 2: strike_speed_ms became click->crack delay (old default 180-220 felt laggy)
 }
+CONFIG_VERSION = 2
 
 VALID_CHOICES = {
-    "whip_style": ("comic", "cyber", "classic"),
-    "sound_mode": ("themed", "random"),
+    "whip_style": ("comic", "cyber", "classic", "taser", "sword"),
+    "sound_mode": ("themed", "tom_combo", "tom_only", "random"),
 }
 
 def get_base_dir():
@@ -84,7 +89,7 @@ def _sanitize(key, value):
         if key == "volume":
             return max(0.0, min(1.0, float(value)))
         if key == "strike_speed_ms":
-            return int(max(60, min(1000, value)))
+            return int(max(40, min(1000, value)))
         return value
     if key in VALID_CHOICES:
         return value if value in VALID_CHOICES[key] else None
@@ -102,6 +107,10 @@ class Config:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
                 if isinstance(loaded, dict):
+                    if loaded.get("config_version", 1) < CONFIG_VERSION:
+                        # Older configs only carry the old default strike speed: switch them to the new fast default
+                        loaded.pop("strike_speed_ms", None)
+                        loaded["config_version"] = CONFIG_VERSION
                     for key, value in loaded.items():
                         if key in DEFAULT_CONFIG:
                             value = _sanitize(key, value)

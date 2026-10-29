@@ -137,15 +137,19 @@ class ActiveStrike:
     """Whip crack animation: wind-up, a loop rolling down the cord, tip snapping into the target, recoil.
     All state changes happen in update(); evaluate_points() is a pure function of the current time."""
     RECOIL_MS = 260.0
+    # The animation starts this far into the swing: the wind-up looked nice but made every click feel laggy
+    WINDUP_SKIP = 0.35
 
-    def __init__(self, origin_x, origin_y, target_x, target_y, style="comic", duration_ms=180):
+    def __init__(self, origin_x, origin_y, target_x, target_y, style="comic", duration_ms=90):
+        """duration_ms = real delay between the click and the crack"""
         self.origin = QPointF(origin_x, origin_y)
         self.target = QPointF(target_x, target_y)
         self.style = style
-        self.crack_ms = float(max(60, duration_ms))
+        self.crack_ms = float(max(40, duration_ms)) / (1.0 - self.WINDUP_SKIP)
         self.total_ms = self.crack_ms + self.RECOIL_MS
         self.p_crack = self.crack_ms / self.total_ms
-        self.start_time = time.perf_counter()
+        self.start_time = time.perf_counter() - self.crack_ms * self.WINDUP_SKIP / 1000.0
+        self.sound_played = False
         self.cracked = False
         self.finished = False
 
@@ -168,6 +172,9 @@ class ActiveStrike:
     def get_progress(self):
         elapsed = (time.perf_counter() - self.start_time) * 1000.0
         return min(1.0, elapsed / self.total_ms)
+
+    def ms_until_crack(self):
+        return self.crack_ms - (time.perf_counter() - self.start_time) * 1000.0
 
     def update(self):
         """Advances state. Returns True exactly once: on the frame the tip cracks."""
@@ -234,6 +241,8 @@ SPARK_COLORS = {
     "cyber": ((0, 255, 255), (255, 0, 200), (255, 255, 255)),
     "classic": ((255, 180, 50), (240, 60, 30), (255, 235, 160)),
     "comic": ((255, 230, 0), (255, 40, 40), (255, 255, 255)),
+    "sword": ((220, 230, 245), (180, 195, 215), (255, 240, 150), (255, 255, 255)),
+    "taser": ((56, 189, 248), (254, 240, 138), (255, 255, 255), (14, 165, 233)),
 }
 
 class SparkParticle:
@@ -256,7 +265,7 @@ class SparkParticle:
         self.y += self.vy
         self.vx *= 0.94
         self.vy *= 0.94
-        if self.style != "cyber":
+        if self.style not in ("cyber", "taser"):
             self.vy += 0.3  # gravity for dust/sparks
         self.life -= self.decay
         return self.life > 0
