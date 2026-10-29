@@ -1,0 +1,26 @@
+# Build output (the .exe is published as a GitHub Release asset, not committed)
+build/
+dist/
+__pycache__/
+*.pyc
+
+# Per-user runtime files
+config.json
+config.json.tmp
+*.log
+*.log.*
+
+# npm
+node_modules/
+npm/*.tgz
+
+# Draft / unused assets (not loaded by the app)
+test_crack.wav
+assets/crop_opt*.png
+assets/test_pow_burst.png
+assets/whip_*.png
+assets/handle_*.png
+
+# Copyrighted third-party audio: never publish (users may drop their own files into custom_sounds/)
+assets/sounds/tom_scream.*
+assets/sounds/whip_tom_combo.wav

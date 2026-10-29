@@ -1,0 +1,36 @@
+{
+  "name": "agentlash",
+  "version": "1.0.0",
+  "description": "AgentLash - biến chuột thành roi da quất tung màn hình Windows trong lúc đợi AI agent làm việc",
+  "keywords": [
+    "whip",
+    "overlay",
+    "desktop",
+    "fun",
+    "windows",
+    "agent"
+  ],
+  "homepage": "https://github.com/thieuhq2906/agentlash#readme",
+  "bugs": {
+    "url": "https://github.com/thieuhq2906/agentlash/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thieuhq2906/agentlash.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "agentlash": "bin/agentlash.js"
+  },
+  "files": [
+    "bin/",
+    "binary.json",
+    "README.md"
+  ],
+  "os": [
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
